@@ -64,8 +64,8 @@ tool.sendline('connect')
 tool.expect('Connection successful.*\[LE\]>')
 tool.sendline('char-write-cmd 0x29 01')
 tool.expect('\[LE\]>')
+time.sleep(1)
 while True:
-    time.sleep(1)
     tool.sendline('char-read-hnd 0x25')
     tool.expect('descriptor: .*') 
     rval = tool.after.split()
@@ -73,5 +73,6 @@ while True:
     ambT = floatfromhex(rval[4] + rval[3])
     #print rval
     calcTmpTarget(objT, ambT)
+    time.sleep(100)
 
 

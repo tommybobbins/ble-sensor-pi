@@ -23,9 +23,11 @@ import pexpect
 import sys
 import time
 from sensor_calcs import *
-import json
 import select
-#from xively_fns import xively_init, xively_write
+import redis
+
+redthis = redis.StrictRedis(host='433board',port=6379, db=0, socket_timeout=3)
+redis_queue="/dastardly/sensor"
 
 
 def floatfromhex(h):
@@ -70,6 +72,9 @@ class SensorTag:
     # Notification handle = 0x0025 value: 9b ff 54 07
     def notification_loop( self ):
         while True:
+#            print ("Sleeping 2")
+#            time.sleep(2)
+#            print ("Finished")
 	    try:
               pnum = self.con.expect('Notification handle = .*? \r', timeout=4)
             except pexpect.TIMEOUT:
@@ -94,32 +99,10 @@ class SensorTag:
         self.cb[handle]=fn;
         return
 
-barometer = None
-datalog = sys.stdout
-#xively_feed = None
-
-def datalog_out(data):
-    # The socket or output file might not be writeable
-    # check with select so we don't block.
-    (re,wr,ex) = select.select([],[datalog],[],0)
-    if len(wr) > 0:
-       datalog.write(json.dumps(data) + "\n")
-       datalog.flush()
-       pass
-    return
-
 
 class SensorCallbacks:
 
-    #Set some dummy values so the first time we write data to Xively we've got all parameters.
-    #Alternative is try,except when writing.
     data = {}
-    data['t006']=100
-    data['accl']=[0,0,0]
-    data['humd']=[100,0]
-    data['baro']=[100,0]
-    data['magn']=[0,0,0]
-    data['gyro']=[0,0,0]
 
     def __init__(self,addr):
         self.data['addr'] = addr
@@ -141,7 +124,11 @@ class SensorCallbacks:
         rawH = (v[3]<<8)+v[2]
         (t, rh) = calcHum(rawT, rawH)
         self.data['humd'] = [t, rh]
-        print "HUMD %.1f" % rh
+#        print "HUMD %.1f" % rh
+        try:
+            redthis.set("humidity%s" % redis_queue, rh)
+        except:
+            print ("Unable to update redis")
 
     def baro(self,v):
         global barometer
@@ -150,9 +137,14 @@ class SensorCallbacks:
         rawP = (v[3]<<8)+v[2]
         (temp, pres) =  self.data['baro'] = barometer.calc(rawT, rawP)
         self.data['time'] = long(time.time() * 1000);
-        print "BARO", temp, pres
-        #datalog_out(self.data)
-#	xively_write(xively_feed, self.data)
+#        print "BARO", temp, pres
+        try:
+            redthis.set("temperature%s" % redis_queue, temp)
+            redthis.expire("temperature%s" % redis_queue, 240)
+            redthis.set("pressure%s" % redis_queue , pres)
+        except:
+            print ("Unable to update redis")
+        time.sleep(120)
 
     def magnet(self,v):
         x = (v[1]<<8)+v[0]
@@ -168,13 +160,12 @@ class SensorCallbacks:
 def main():
     global datalog
     global barometer
-#    global xively_feed
 
-    bluetooth_adr = sys.argv[1]
+    bluetooth_adr = "1C:BA:8C:20:CC:96"
+#    bluetooth_adr = sys.argv[1]
     if len(sys.argv) > 2:
         datalog = open(sys.argv[2], 'w+')
 
-#    xively_feed = xively_init()
 
     while True:
 
@@ -182,14 +173,14 @@ def main():
       cbs = SensorCallbacks(bluetooth_adr)
 
       # enable TMP006 sensor
-      tag.register_cb(0x25,cbs.tmp006)
-      tag.char_write_cmd(0x29,0x01)
-      tag.char_write_cmd(0x26,0x0100)
+#      tag.register_cb(0x25,cbs.tmp006)
+#      tag.char_write_cmd(0x29,0x01)
+#      tag.char_write_cmd(0x26,0x0100)
 
       # enable accelerometer
-      tag.register_cb(0x2d,cbs.accel)
-      tag.char_write_cmd(0x31,0x01)
-      tag.char_write_cmd(0x2e,0x0100)
+#      tag.register_cb(0x2d,cbs.accel)
+#      tag.char_write_cmd(0x31,0x01)
+#      tag.char_write_cmd(0x2e,0x0100)
 
       # enable humidity
       tag.register_cb(0x38, cbs.humidity)
@@ -197,14 +188,14 @@ def main():
       tag.char_write_cmd(0x39,0x0100)
 
       # enable magnetometer
-      tag.register_cb(0x40,cbs.magnet)
-      tag.char_write_cmd(0x44,0x01)
-      tag.char_write_cmd(0x41,0x0100)
+#      tag.register_cb(0x40,cbs.magnet)
+#      tag.char_write_cmd(0x44,0x01)
+#      tag.char_write_cmd(0x41,0x0100)
 
       # enable gyroscope
-      tag.register_cb(0x57,cbs.gyro)
-      tag.char_write_cmd(0x5b,0x07)
-      tag.char_write_cmd(0x58,0x0100)
+#      tag.register_cb(0x57,cbs.gyro)
+#      tag.char_write_cmd(0x5b,0x07)
+#      tag.char_write_cmd(0x58,0x0100)
 
       # fetch barometer calibration
       tag.char_write_cmd(0x4f,0x02)
